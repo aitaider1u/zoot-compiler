@@ -1,0 +1,348 @@
+package zoot.analyse ;
+
+import java.util.*;
+import zoot.arbre.* ;
+import zoot.arbre.expressions.* ;
+import zoot.arbre.expressions.binaire.* ;
+import zoot.arbre.expressions.unaire.* ;
+
+import zoot.arbre.instructions.* ;
+import zoot.tds.* ;
+
+import zoot.exceptions.AnalyseSyntaxiqueException;
+
+import java_cup.runtime.*;
+
+action code {:
+             :} ;
+
+parser code {:
+
+    public void report_error(String message, Object info) {
+
+        HashMap<Integer, String> lesTerminaux = new HashMap<>() ;
+    
+        lesTerminaux.put(new Integer(CodesLexicaux.DEBUT), "debut") ;
+        lesTerminaux.put(new Integer(CodesLexicaux.FIN), "fin") ;
+        lesTerminaux.put(new Integer(CodesLexicaux.POINTVIRGULE), ";") ;
+
+        StringBuffer m = new StringBuffer() ;
+
+        if (info instanceof java_cup.runtime.Symbol) {
+            java_cup.runtime.Symbol s = ((java_cup.runtime.Symbol) info);
+
+            if (s.left >= 0) {                
+                m.append("\tligne : " + (s.left + 1)) ;
+                if (s.right >= 0)                    
+                    m.append(" colonne : " + (s.right+1)) ;
+            }
+            
+            if (s.value != null) {
+                lesTerminaux.put(CodesLexicaux.CSTENTIERE, "" + s.value) ;
+            }
+
+            if (lesTerminaux.containsKey(new Integer(s.sym))) {
+                m.append(" dernier token lu : " + lesTerminaux.get(new Integer(s.sym))) ;
+            }
+            else {
+                m.append(" expression non terminée") ;
+            }
+
+        }
+        throw new AnalyseSyntaxiqueException("" + m) ;
+    }
+
+    public void report_fatal_error(String message, Object info) {
+        report_error(message, info);
+    }
+:};
+   
+/* ------------Declaration of Terminals and Non Terminals Section----------- */
+   
+/* Terminals (tokens returned by the scanner).  */
+
+terminal Symbol    DEBUT, FIN, POINTVIRGULE, ECRIRE,RETOURNE, EGALE , VARIABLES,FONCTIONS,PARENTHESEOUVRANTE,PARENTHESEFERMANTE,VIRGULE,PLUS,MULT,NEGATIVE,NON,INF,EQUAL,DIFFERENT,ET,OU,REPETER,JUSQUA,FINREPETER,SI,ALORS,FINSI,SINON;
+terminal String    CSTENTIERE ,CSTBOOLEENE, IDF , TYPE;
+   
+/* Non terminals used in the grammar section.  */
+
+
+
+non terminal Programme PROG;
+non terminal ArbreAbstrait  LVARDEC,FONCTDEC;
+non terminal BlocDInstructions LINST;
+non terminal Instruction INST,VARDEC,AFFECTATION;
+non terminal Expression EXP,EXPT ;
+non terminal String FINBLOC,VARIABLEPP,DEBUTBLOCFONCTION,VARPROFILDEC,NTIDF;
+non terminal ArrayList<BlocDInstructions> LISTFONCT;
+non terminal ArrayList<String> lVARPROFILDEC;
+non terminal ArrayList<Expression> PAR_EFF;
+non terminal Integer PARAMETRE;
+
+
+
+precedence left OU;
+precedence left ET;
+precedence left EQUAL,DIFFERENT;
+precedence left INF;
+precedence left PLUS;
+precedence left MULT;
+precedence left NON,NEGATIVE;
+precedence left PARENTHESEOUVRANTE;
+
+
+
+/* ----------------------------Grammar Section-------------------- */
+ 
+start with PROG ;
+
+PROG    ::=     VARIABLEPP LVARDEC:a FONCTIONS LISTFONCT:lf DEBUT  LINST:li  FINBLOC
+                {:
+                    Programme p =  new Programme(lileft + 1);
+                    p.ajouter((BlocDInstructions)li);
+                    li.setNumBloc(1);
+                    p.ajouter((ArrayList<BlocDInstructions>)lf);
+                    RESULT = p ;
+                 :}
+                ;
+
+LINST   ::=     LINST:li  INST:i
+                {: ((BlocDInstructions)li).ajouter(i) ;
+                   RESULT = li ; :}
+        |
+                INST:i
+                {: BlocDInstructions b = new BlocDInstructions(ileft + 1) ;
+                   b.ajouter(i) ;
+                   RESULT = b ; :}
+                ;
+
+INST    ::=     ECRIRE EXP:e POINTVIRGULE
+                {: RESULT = new Ecrire(e, eleft + 1) ; :}
+            |
+                IDF:i EGALE EXP:e POINTVIRGULE
+                                {: RESULT = new Affectation (new Idf(i,eleft+1), e,eleft + 1 ); :}
+            |  RETOURNE EXP:e POINTVIRGULE
+                {:
+                    //System.out.println("retourne");
+                    RESULT = new Retourner(e, eleft + 1) ;
+                :}
+            | REPETER LINST:li JUSQUA EXP:e FINREPETER
+                {:
+                    //System.out.println("repeter");
+                    RESULT = new Repeter(lileft + 1, e, li);
+                :}
+            | SI EXP:e ALORS LINST:li FINSI
+                {:
+                    //System.out.println("repeter");
+                    RESULT = new Si(eleft + 1 , e, li ) ;
+                :}
+           | SI EXP:e ALORS  FINSI
+               {:
+                   RESULT = new Si(eleft + 1, e);
+               :}
+           | SI EXP:e ALORS LINST:si SINON LINST:sn FINSI
+               {:
+                   RESULT = new SiSinon(eleft + 1,e,si,sn);
+               :}
+          | SI EXP:e ALORS  SINON LINST:sn FINSI
+              {:
+                  RESULT = new SiSinon(eleft + 1,e, sn);
+              :}
+        ;
+
+
+EXPT     ::=     CSTENTIERE:c
+                {: RESULT = new ConstanteEntiere(c, cleft + 1) ; :}
+
+         |
+                CSTBOOLEENE:c
+                {: RESULT = new ConstanteBooleenne(c, cleft + 1) ; :}
+         |
+                IDF:e
+                {: RESULT = new Idf(e,eleft + 1) ; :}
+         |
+                IDF:i PARENTHESEOUVRANTE  PARENTHESEFERMANTE
+                {:
+                    RESULT = new AppelDeFonction(i,ileft + 1) ;
+                :}
+        |
+                IDF:i PARENTHESEOUVRANTE PAR_EFF:array PARENTHESEFERMANTE
+                {:
+                    RESULT = new AppelDeFonction(i,array,ileft + 1);
+                :}
+        ;
+
+
+
+EXP    ::=  EXP:eg PLUS EXP:ed
+            {:
+                RESULT = new Plus(egleft + 1,eg,ed);
+            :}
+            |
+            EXP:eg MULT EXP:ed
+            {:
+                RESULT = new Mult(egleft + 1,eg,ed);
+            :}
+            |
+            EXP:eg INF EXP:ed
+            {:
+                    RESULT = new Inf(egleft + 1,eg,ed);
+            :}
+            |
+                 EXP:eg EQUAL EXP:ed
+                {:
+                    RESULT = new Egale(egleft + 1,eg,ed);
+                :}
+            |
+                EXP:eg DIFFERENT EXP:ed
+                {:
+                     RESULT = new Different(egleft + 1,eg,ed);
+                :}
+            |
+                EXP:eg ET EXP:ed
+                {:
+                     RESULT = new Et(egleft + 1,eg,ed);
+                :}
+            |
+                EXP:eg OU EXP:ed
+                {:
+                     RESULT = new Ou(egleft + 1,eg,ed);
+                :}
+            |
+            PARENTHESEOUVRANTE EXP:eg PARENTHESEFERMANTE
+            {:
+                RESULT = eg;
+            :}
+            |
+                NEGATIVE EXP:e {:
+                    RESULT = new Negative(eleft + 1,e);
+                :}
+            |
+                NON EXP:e {:
+                    RESULT = new Non(eleft + 1,e);
+                :}
+            |
+
+            EXPT:e
+            {:
+                RESULT = e;
+            :}
+
+            ;
+
+
+
+PAR_EFF   ::= EXP:e VIRGULE PAR_EFF:array
+            {:  array.add(e);
+                RESULT = array;
+            :}
+            |
+              EXP:e
+              {:
+                ArrayList<Expression> p = new ArrayList<>();
+                p.add(e);
+                RESULT = p;
+              :}
+            ;
+
+
+LVARDEC   ::=   VARDEC LVARDEC | VARDEC;
+
+
+VARDEC   ::=    TYPE:t IDF:i POINTVIRGULE
+                {: //ajouter ça dans la liste des dans
+                    TDS.getInstance().ajouter(new EntreeVariable(i),new SymboleVaraible(t),ileft + 1);
+                :}
+                ;
+
+
+
+
+
+LISTFONCT ::=    LISTFONCT:lf  FONCTDEC:li
+                      {:
+                            lf.add((BlocDInstructions)li);
+                            RESULT = lf;
+                      :}
+             |
+                 FONCTDEC:li
+                      {:
+                            ArrayList<BlocDInstructions> a = new ArrayList<>();
+                            a.add((BlocDInstructions)li);
+                            //BlocDInstructions b = new BlocDInstructions(lileft + 1) ;
+                            //lf.ajouter(li);
+                            RESULT =  a ;
+                      :}
+             ;
+
+
+
+FONCTDEC   ::=  TYPE:t NTIDF:i PARAMETRE:par VARIABLES DEBUT  LINST:li  FINBLOC
+                    {:
+                      TDS.getInstance().ajouter(new EntreeFonction(i,par),new SymboleFonction(t),ileft + 1);
+                      RESULT = li  ;
+                    :}
+                |
+                    TYPE:t NTIDF:i PARAMETRE:par  VARIABLES LVARDEC:a DEBUT  LINST:li  FINBLOC
+                    {:
+                        TDS.getInstance().ajouter(new EntreeFonction(i,par),new SymboleFonction(t),ileft + 1);
+                        RESULT = li  ;
+                    :}
+                ;
+
+NTIDF ::= IDF:i
+        {:
+            TDS.getInstance().setNomFonctionActuel(i);
+            RESULT = i ;
+        :};
+
+
+
+
+PARAMETRE  ::= DEBUTBLOCFONCTION PARENTHESEFERMANTE
+                    {:
+                      // TO DO
+                        RESULT = new Integer (0);
+                    :}
+                |
+                DEBUTBLOCFONCTION LVARDEC:a PARENTHESEFERMANTE
+                    {:
+                           TDS.getInstance().selectionerLesvarPar();
+                          RESULT = new Integer (TDS.getInstance().getNbVariable());
+                    :}
+                ;
+
+
+
+
+
+
+
+
+VARIABLEPP ::= VARIABLES
+                    {:
+                          //elle fait le premier entree bloc dans le programme principele
+                          TDS.getInstance().entreBloc();
+                    :}
+                ;
+
+
+
+DEBUTBLOCFONCTION ::= PARENTHESEOUVRANTE
+                     {:
+                        //sera fait a chaque sortie d'un bloques
+                        TDS.getInstance().entreBloc();
+                    :}
+                ;
+
+
+
+
+
+FINBLOC ::= FIN
+                    {:
+                        //sera fait a chaque sortie d'un bloques
+                        TDS.getInstance().sortieBloc();
+                    :}
+                ;
+
